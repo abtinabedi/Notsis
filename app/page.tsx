@@ -7,7 +7,7 @@ import { useState, useCallback, useMemo, useId, useEffect } from "react";
 ────────────────────────────────────────────────────────────── */
 
 type Module = "calculator" | "gpa" | "predictor";
-type ComponentKey = "vize" | "odev" | "final";
+// (ComponentKey removed — both modules now use id: string)
 
 /* ── Letter grade table ── */
 interface LetterGradeInfo {
@@ -41,32 +41,39 @@ const LG_GROUPS = [
 ];
 
 function getLetterGrade(score: number): LetterGradeInfo {
-  const row = LETTER_GRADE_TABLE.find((r) => score >= r.min && score <= r.max);
-  return row ?? LETTER_GRADE_TABLE[LETTER_GRADE_TABLE.length - 1];
+  // Table is sorted high→low by min; first match where score >= min is correct
+  return LETTER_GRADE_TABLE.find((r) => score >= r.min) ?? LETTER_GRADE_TABLE[LETTER_GRADE_TABLE.length - 1];
 }
 
 /* ── Calculator module ── */
 interface GradeComponent {
-  key: ComponentKey;
+  id: string;
   label: string;
   icon: string;
   weight: number;
   grade: string;
-  optional: boolean;
-  enabled: boolean;
+  removable: boolean;
 }
 
-const INITIAL_COMPONENTS: GradeComponent[] = [
-  { key: "vize",  label: "Vize",         icon: "📖", weight: 30, grade: "", optional: false, enabled: true },
-  { key: "odev",  label: "Ödev / Proje", icon: "✏️", weight: 30, grade: "", optional: true,  enabled: true },
-  { key: "final", label: "Final",        icon: "🎓", weight: 40, grade: "", optional: false, enabled: true },
+const COMP_PRESETS = [
+  { label: "Vize",  icon: "📖" },
+  { label: "Quiz",  icon: "✍️" },
+  { label: "Ödev",  icon: "✏️" },
+  { label: "Proje", icon: "💻" },
+  { label: "Lab",   icon: "🔬" },
+  { label: "Sınav", icon: "📝" },
 ];
 
-const SEGMENT_COLORS: Record<ComponentKey, string> = {
-  vize:  "#8b5cf6",
-  odev:  "#06b6d4",
-  final: "#f59e0b",
-};
+const SEG_PALETTE = ["#8b5cf6","#06b6d4","#f59e0b","#22c55e","#ec4899","#84cc16","#f97316","#a78bfa"];
+const getSegColor = (i: number) => SEG_PALETTE[i % SEG_PALETTE.length];
+
+function makeInitialComponents(): GradeComponent[] {
+  return [
+    { id: "vize",  label: "Vize",  icon: "📖", weight: 30, grade: "", removable: true },
+    { id: "odev",  label: "Ödev",  icon: "✏️", weight: 30, grade: "", removable: true },
+    { id: "final", label: "Final", icon: "🎓", weight: 40, grade: "", removable: false },
+  ];
+}
 
 function parseNum(raw: string): number | null {
   const v = parseFloat(raw.replace(",", "."));
@@ -74,8 +81,8 @@ function parseNum(raw: string): number | null {
   return Math.min(100, Math.max(0, v));
 }
 
-function sliderBg(val: number) {
-  return `linear-gradient(to right, #7c3aed 0%, #8b5cf6 ${val}%, #1a1a28 ${val}%, #1a1a28 100%)`;
+function sliderBg(val: number, color = "#8b5cf6") {
+  return `linear-gradient(to right, ${color} 0%, ${color} ${val}%, var(--bg-elevated) ${val}%, var(--bg-elevated) 100%)`;
 }
 
 /* ── GPA module ── */
@@ -102,21 +109,20 @@ function gpaTextColor(gpa: number): string {
 
 /* ── Predictor module ── */
 interface PredComp {
-  key: ComponentKey;
+  id: string;
   label: string;
   icon: string;
-  weight: string;   // string so the input is controlled freely
+  weight: string;    // string so input is controlled freely
   grade: string;
-  optional: boolean;
-  enabled: boolean; // optional comps can be toggled off (no ödev in this course)
-  isTarget: boolean; // this is the component we're predicting for
+  removable: boolean;
+  isTarget: boolean; // the component we’re predicting for
 }
 
 function freshPredComps(): PredComp[] {
   return [
-    { key: "vize",  label: "Vize",         icon: "📖", weight: "30", grade: "", optional: false, enabled: true, isTarget: false },
-    { key: "odev",  label: "Ödev / Proje", icon: "✏️", weight: "30", grade: "", optional: true,  enabled: true, isTarget: false },
-    { key: "final", label: "Final",        icon: "🎓", weight: "40", grade: "", optional: false, enabled: true, isTarget: true  },
+    { id: "vize",  label: "Vize",  icon: "📖", weight: "30", grade: "", removable: true,  isTarget: false },
+    { id: "odev",  label: "Ödev",  icon: "✏️", weight: "30", grade: "", removable: true,  isTarget: false },
+    { id: "final", label: "Final", icon: "🎓", weight: "40", grade: "", removable: false, isTarget: true  },
   ];
 }
 
@@ -148,23 +154,21 @@ export default function Home() {
   /* ════════════════════════════════════════
      MODULE 1 — Not Hesaplayıcı State
   ════════════════════════════════════════ */
-  const [components, setComponents] = useState<GradeComponent[]>(INITIAL_COMPONENTS);
+  const [components, setComponents] = useState<GradeComponent[]>(makeInitialComponents);
   const [bellEnabled, setBellEnabled] = useState(false);
   const [classAvg, setClassAvg] = useState("");
   const [bellThreshold, setBellThreshold] = useState<60 | 70>(60);
 
-  // Only enabled components participate in the calculation
-  const activeComponents = useMemo(() => components.filter((c) => c.enabled), [components]);
-  const totalWeight = useMemo(() => activeComponents.reduce((s, c) => s + c.weight, 0), [activeComponents]);
+  const totalWeight = useMemo(() => components.reduce((s, c) => s + c.weight, 0), [components]);
   const weightOk = totalWeight === 100;
 
   const rawAverage = useMemo<number | null>(() => {
     if (!weightOk) return null;
-    if (activeComponents.some((c) => parseNum(c.grade) === null)) return null;
+    if (components.some((c) => parseNum(c.grade) === null)) return null;
     return Number(
-      activeComponents.reduce((s, c) => s + (parseNum(c.grade)! * c.weight) / 100, 0).toFixed(2)
+      components.reduce((s, c) => s + (parseNum(c.grade)! * c.weight) / 100, 0).toFixed(2)
     );
-  }, [activeComponents, weightOk]);
+  }, [components, weightOk]);
 
   const bellInfo = useMemo(() => {
     if (!bellEnabled || rawAverage === null) return null;
@@ -178,22 +182,27 @@ export default function Home() {
   const displayScore = bellInfo ? bellInfo.adjusted : rawAverage;
   const letterInfo = displayScore !== null ? getLetterGrade(displayScore) : null;
 
-  const setWeight = useCallback((key: ComponentKey, val: string) => {
-    const n = parseInt(val, 10);
-    if (isNaN(n)) return;
-    setComponents((prev) => prev.map((c) => c.key === key ? { ...c, weight: Math.min(100, Math.max(0, n)) } : c));
+  const updateComp = useCallback((id: string, updates: Partial<GradeComponent>) => {
+    setComponents((prev) => prev.map((c) => c.id === id ? { ...c, ...updates } : c));
   }, []);
 
-  const setGrade = useCallback((key: ComponentKey, val: string) => {
-    setComponents((prev) => prev.map((c) => c.key === key ? { ...c, grade: val } : c));
+  const removeComp = useCallback((id: string) => {
+    setComponents((prev) => prev.filter((c) => c.id !== id));
   }, []);
 
-  const toggleComponent = useCallback((key: ComponentKey) => {
-    setComponents((prev) => prev.map((c) => c.key === key ? { ...c, enabled: !c.enabled, grade: "" } : c));
+  const addComp = useCallback((label: string, icon: string) => {
+    setComponents((prev) => [...prev, {
+      id: `c-${Date.now()}`,
+      label,
+      icon,
+      weight: 0,
+      grade: "",
+      removable: true,
+    }]);
   }, []);
 
   const handleReset = useCallback(() => {
-    setComponents(INITIAL_COMPONENTS.map((c) => ({ ...c })));
+    setComponents(makeInitialComponents());
     setClassAvg("");
     setBellEnabled(false);
     setBellThreshold(60);
@@ -245,41 +254,38 @@ export default function Home() {
   const [predClassAvg, setPredClassAvg] = useState("");
   const [predBellThreshold, setPredBellThreshold] = useState<60 | 70>(60);
 
-  // The component we're predicting for (must be enabled)
-  const targetComp = useMemo(() => predComps.find((c) => c.isTarget && c.enabled), [predComps]);
+  // The component we’re predicting for
+  const targetComp = useMemo(() => predComps.find((c) => c.isTarget), [predComps]);
 
-  // Weight validity: only among ENABLED comps (disabled optional ones are excluded)
+  // Weight validity: all comps must sum to 100
   const predWeightOk = useMemo(() => {
-    const total = predComps
-      .filter((c) => c.enabled)
-      .reduce((s, c) => {
-        const w = parseFloat(c.weight);
-        return s + (isNaN(w) ? 0 : w);
-      }, 0);
+    const total = predComps.reduce((s, c) => {
+      const w = parseFloat(c.weight);
+      return s + (isNaN(w) ? 0 : w);
+    }, 0);
     return Math.abs(total - 100) < 0.01;
   }, [predComps]);
 
-  // Target component's weight (only if enabled)
+  // Target component’s weight
   const targetWeight = useMemo(() => {
     if (!targetComp) return 0;
     const tw = parseFloat(targetComp.weight);
     return isNaN(tw) ? 0 : tw;
   }, [targetComp]);
 
-  // Weighted sum of all KNOWN (non-target, enabled, grade entered) comps
+  // Weighted sum of all known (non-target, grade entered) comps
   const knownWeightedSum = useMemo(() => {
     return predComps
-      .filter((c) => c.enabled && !c.isTarget)
+      .filter((c) => !c.isTarget)
       .reduce((s, c) => {
         const g = parseNum(c.grade);
         const w = parseFloat(c.weight);
-        // If grade is empty → contributes 0 (user didn't enter it yet → will block below)
         if (g === null || isNaN(w)) return s;
         return s + (g * w) / 100;
       }, 0);
   }, [predComps]);
 
-  // Bell curve correction for predictor: if class avg < threshold, the raw score needed is lower
+  // Bell curve correction for predictor
   const predBellCorrection = useMemo(() => {
     if (!predBellEnabled) return 0;
     const ca = parseFloat(predClassAvg);
@@ -290,45 +296,33 @@ export default function Home() {
   const predResults = useMemo(() => {
     if (!predWeightOk || targetWeight <= 0 || !targetComp) return [];
 
-    // All enabled non-target comps must have a grade filled in
+    // All non-target comps must have a grade
     const allKnownFilled = predComps
-      .filter((c) => c.enabled && !c.isTarget)
+      .filter((c) => !c.isTarget)
       .every((c) => parseNum(c.grade) !== null);
 
     if (!allKnownFilled) return [];
 
     return LETTER_GRADE_TABLE.map((row) => {
-      /*
-       * To reach letter grade `row`, the WEIGHTED average must be >= row.min.
-       *
-       * If bell is enabled and correction > 0:
-       *   adjustedScore = rawScore + correction
-       *   We need adjustedScore >= row.min
-       *   → rawScore >= row.min - correction
-       *
-       * rawScore = knownWeightedSum + (neededFinal * targetWeight / 100)
-       * neededFinal = (effectiveTarget - knownWeightedSum) / (targetWeight / 100)
-       */
       const effectiveTarget = row.min - predBellCorrection;
       const needed = (effectiveTarget - knownWeightedSum) / (targetWeight / 100);
-      // Round UP to 1 decimal to ensure the threshold is met
       const neededRounded = Math.ceil(needed * 10) / 10;
       const impossible = neededRounded > 100;
-      const alreadyMet = neededRounded <= 0; // even scoring 0 achieves this grade
+      const alreadyMet = neededRounded <= 0;
 
       let statusLabel: string;
       let statusCls: string;
-      if (impossible)     { statusLabel = "İmkansız";         statusCls = "no"; }
-      else if (alreadyMet) { statusLabel = "Zaten karşılandı"; statusCls = "ok"; }
-      else if (neededRounded >= 85) { statusLabel = "Zor";    statusCls = "hard"; }
-      else if (neededRounded >= 65) { statusLabel = "Mümkün"; statusCls = "warning"; }
-      else                           { statusLabel = "Kolay";  statusCls = "ok"; }
+      if (impossible)            { statusLabel = "İmkansız";         statusCls = "no"; }
+      else if (alreadyMet)       { statusLabel = "Zaten karşılandı"; statusCls = "ok"; }
+      else if (neededRounded >= 85) { statusLabel = "Zor";          statusCls = "hard"; }
+      else if (neededRounded >= 65) { statusLabel = "Mümkün";       statusCls = "warning"; }
+      else                          { statusLabel = "Kolay";         statusCls = "ok"; }
 
       let neededColor = "";
       if (!impossible && !alreadyMet) {
-        if (neededRounded < 65)      neededColor = "green";
-        else if (neededRounded < 85) neededColor = "amber";
-        else                          neededColor = "red";
+        if (neededRounded < 65)       neededColor = "green";
+        else if (neededRounded < 85)  neededColor = "amber";
+        else                           neededColor = "red";
       }
 
       return {
@@ -339,49 +333,50 @@ export default function Home() {
         statusLabel,
         statusCls,
         neededColor,
-        displayNeeded: impossible
-          ? "—"
-          : alreadyMet
-          ? "0.0"
-          : neededRounded.toFixed(1),
+        displayNeeded: impossible ? "—" : alreadyMet ? "0.0" : neededRounded.toFixed(1),
       };
     });
   }, [predWeightOk, targetWeight, targetComp, predComps, knownWeightedSum, predBellCorrection]);
 
   // Update any field on a predictor component
-  const updatePredComp = useCallback((key: ComponentKey, updates: Partial<PredComp>) => {
-    setPredComps((prev) => prev.map((c) => c.key === key ? { ...c, ...updates } : c));
+  const updatePredComp = useCallback((id: string, updates: Partial<PredComp>) => {
+    setPredComps((prev) => prev.map((c) => c.id === id ? { ...c, ...updates } : c));
   }, []);
 
-  // Toggle optional comp in predictor (if it becomes disabled, it can't be the target)
-  const togglePredComp = useCallback((key: ComponentKey) => {
+  // Remove a predictor component (only removable ones)
+  const removePredComp = useCallback((id: string) => {
     setPredComps((prev) => {
-      const comp = prev.find((c) => c.key === key);
-      if (!comp || !comp.optional) return prev;
-      const nowEnabled = !comp.enabled;
-      // If we're disabling the current target, assign target to "final" by default
-      return prev.map((c) => {
-        if (c.key === key) {
-          return { ...c, enabled: nowEnabled, grade: "", isTarget: false };
-        }
-        // If the toggled comp was the target and we disabled it, make "final" the new target
-        if (!nowEnabled && comp.isTarget && c.key === "final") {
-          return { ...c, isTarget: true, grade: "" };
-        }
-        return c;
-      });
+      const removing = prev.find((c) => c.id === id);
+      if (!removing || !removing.removable) return prev;
+      const next = prev.filter((c) => c.id !== id);
+      // If we removed the target, make the last comp the new target
+      if (removing.isTarget && next.length > 0) {
+        const last = next[next.length - 1];
+        return next.map((c) => c.id === last.id ? { ...c, isTarget: true, grade: "" } : c);
+      }
+      return next;
     });
   }, []);
 
+  // Add a new predictor component
+  const addPredComp = useCallback((label: string, icon: string) => {
+    setPredComps((prev) => [...prev, {
+      id: `p-${Date.now()}`,
+      label,
+      icon,
+      weight: "0",
+      grade: "",
+      removable: true,
+      isTarget: false,
+    }]);
+  }, []);
+
   // Make a component the prediction target
-  const setPredTarget = useCallback((key: ComponentKey) => {
+  const setPredTarget = useCallback((id: string) => {
     setPredComps((prev) => prev.map((c) => ({
       ...c,
-      isTarget: c.key === key,
-      // Enable the component being set as target (could have been disabled previously if optional)
-      enabled: c.key === key ? true : c.enabled,
-      // Clear grade on the new target; preserve grades on others
-      grade: c.key === key ? "" : c.grade,
+      isTarget: c.id === id,
+      grade: c.id === id ? "" : c.grade,
     })));
   }, []);
 
@@ -476,66 +471,73 @@ export default function Home() {
               <p className="page-subtitle">Ağırlıkları belirle, notları gir — ortalama ve harf notunu anında hesapla.</p>
             </div>
 
-            {/* Ağırlıklar */}
-            <section className="card fade-up-2" aria-label="Ağırlık ayarları">
+            {/* Bileşenler & Ağırlıklar */}
+            <section className="card fade-up-2" aria-label="Bileşenler ve ağırlıklar">
               <div className="card-header">
                 <div className="card-header-left">
                   <div className="card-icon">⚖️</div>
                   <div>
-                    <p className="card-title">Ağırlıklar</p>
-                    <p className="card-desc">Her bileşenin yüzde ağırlığı — toplam %100 olmalı</p>
+                    <p className="card-title">Bileşenler & Ağırlıklar</p>
+                    <p className="card-desc">Adı düzenle, ağırlığı gir — toplam %100 olmalı</p>
                   </div>
                 </div>
               </div>
               <div className="card-body">
-                {/* Mini bar preview */}
+                {/* Color bar preview */}
                 <div className="weight-bar" aria-hidden="true">
-                  {activeComponents.map((c) => (
+                  {components.map((c, i) => (
                     <div
-                      key={c.key}
+                      key={c.id}
                       className="weight-bar-seg"
-                      style={{ flex: c.weight, background: SEGMENT_COLORS[c.key], minWidth: c.weight > 0 ? "4px" : "0" }}
+                      style={{ flex: c.weight, background: getSegColor(i), minWidth: c.weight > 0 ? "4px" : "0" }}
                     />
                   ))}
                 </div>
 
-                <div style={{ display: "flex", flexDirection: "column", gap: "0.625rem" }}>
-                  {components.map((comp) => (
-                    <div key={comp.key} className="weight-row">
-                      <label
-                        htmlFor={`${uid}-weight-${comp.key}`}
-                        className="weight-row-label"
-                        style={{ color: comp.enabled ? "var(--text-1)" : "var(--text-3)" }}
-                      >
-                        <span>{comp.icon}</span>
-                        {comp.label}
-                      </label>
-                      <div className="weight-input-wrap" style={{ opacity: comp.enabled ? 1 : 0.3 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                  {components.map((comp, i) => (
+                    <div key={comp.id} className="weight-row">
+                      {/* Editable label */}
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.35rem", minWidth: 0, overflow: "hidden" }}>
+                        <span style={{ flexShrink: 0 }}>{comp.icon}</span>
                         <input
-                          id={`${uid}-weight-${comp.key}`}
+                          type="text"
+                          value={comp.label}
+                          onChange={(e) => updateComp(comp.id, { label: e.target.value })}
+                          className="course-input"
+                          style={{ fontSize: "0.85rem", fontWeight: 600 }}
+                          aria-label={`${comp.label} adı`}
+                        />
+                      </div>
+                      {/* Weight input */}
+                      <div className="weight-input-wrap">
+                        <input
+                          id={`${uid}-weight-${comp.id}`}
                           type="number"
                           min={0}
                           max={100}
                           className="weight-input"
-                          value={comp.enabled ? comp.weight : ""}
-                          placeholder="—"
-                          onChange={(e) => comp.enabled && setWeight(comp.key, e.target.value)}
-                          disabled={!comp.enabled}
+                          value={comp.weight}
+                          onChange={(e) => {
+                            const n = parseInt(e.target.value, 10);
+                            updateComp(comp.id, { weight: isNaN(n) ? 0 : Math.min(100, Math.max(0, n)) });
+                          }}
                           aria-label={`${comp.label} ağırlığı`}
                         />
-                        {comp.enabled && <span className="weight-pct">%</span>}
+                        <span className="weight-pct">%</span>
                       </div>
-                      {comp.optional ? (
+                      {/* Remove or spacer */}
+                      {comp.removable ? (
                         <button
-                          className={`toggle-btn ${comp.enabled ? "remove" : "add"}`}
-                          onClick={() => toggleComponent(comp.key)}
-                          title={comp.enabled ? "Kaldır" : "Ekle"}
-                          aria-label={comp.enabled ? `${comp.label} kaldır` : `${comp.label} ekle`}
+                          className="toggle-btn remove"
+                          onClick={() => removeComp(comp.id)}
+                          title={`${comp.label} kaldır`}
+                          aria-label={`${comp.label} kaldır`}
                         >
-                          {comp.enabled ? "✕" : "+"}
+                          ✕
                         </button>
                       ) : (
-                        <div style={{ width: 30 }} />
+                        <div style={{ width: 28 }} />
                       )}
                     </div>
                   ))}
@@ -551,6 +553,21 @@ export default function Home() {
                       </span>
                     )}
                   </span>
+                </div>
+
+                {/* Preset add buttons */}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "0.375rem", marginTop: "0.625rem", paddingTop: "0.625rem", borderTop: "1px solid var(--border)" }}>
+                  <span style={{ fontSize: "0.6rem", fontWeight: 700, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.08em", alignSelf: "center", marginRight: "0.125rem" }}>+ Ekle:</span>
+                  {COMP_PRESETS.map((p) => (
+                    <button
+                      key={p.label}
+                      className="btn btn-ghost btn-sm"
+                      style={{ fontSize: "0.7rem", padding: "0.25rem 0.5rem" }}
+                      onClick={() => addComp(p.label, p.icon)}
+                    >
+                      {p.icon} {p.label}
+                    </button>
+                  ))}
                 </div>
               </div>
             </section>
@@ -568,12 +585,13 @@ export default function Home() {
               </div>
               <div className="card-body">
                 <div className="grade-rows">
-                  {activeComponents.map((comp) => {
+                  {components.map((comp, i) => {
                     const gVal = parseNum(comp.grade);
                     const contribution = gVal !== null ? Number(((gVal * comp.weight) / 100).toFixed(2)) : null;
                     const sliderVal = gVal ?? 0;
+                    const color = getSegColor(i);
                     return (
-                      <div key={comp.key} className="grade-row">
+                      <div key={comp.id} className="grade-row">
                         <div className="grade-row-left">
                           <div className="grade-row-header">
                             <span className="grade-row-name">
@@ -586,20 +604,20 @@ export default function Home() {
                             </span>
                           </div>
                           <input
-                            id={`${uid}-slider-${comp.key}`}
+                            id={`${uid}-slider-${comp.id}`}
                             type="range"
                             min={0}
                             max={100}
                             step={1}
                             value={sliderVal}
                             className="grade-slider-wrap"
-                            style={{ background: sliderBg(sliderVal) }}
-                            onChange={(e) => setGrade(comp.key, e.target.value)}
+                            style={{ background: sliderBg(sliderVal, color) }}
+                            onChange={(e) => updateComp(comp.id, { grade: e.target.value })}
                             aria-label={`${comp.label} kaydırıcı`}
                           />
                         </div>
                         <input
-                          id={`${uid}-grade-${comp.key}`}
+                          id={`${uid}-grade-${comp.id}`}
                           type="number"
                           min={0}
                           max={100}
@@ -607,7 +625,7 @@ export default function Home() {
                           placeholder="—"
                           className="grade-number"
                           value={comp.grade}
-                          onChange={(e) => setGrade(comp.key, e.target.value)}
+                          onChange={(e) => updateComp(comp.id, { grade: e.target.value })}
                           aria-label={`${comp.label} notu`}
                         />
                       </div>
@@ -788,18 +806,19 @@ export default function Home() {
                 </div>
                 <div className="card-body">
                   <div className="breakdown-rows">
-                    {activeComponents.map((comp) => {
+                    {components.map((comp, i) => {
                       const gVal = parseNum(comp.grade) ?? 0;
                       const contribution = Number(((gVal * comp.weight) / 100).toFixed(2));
+                      const color = getSegColor(i);
                       return (
-                        <div key={comp.key} className="breakdown-row">
+                        <div key={comp.id} className="breakdown-row">
                           <span className="breakdown-name"><span>{comp.icon}</span> {comp.label}</span>
                           <div className="breakdown-bar-track" aria-hidden="true">
                             <div
                               className="breakdown-bar-fill"
                               style={{
                                 width: `${contribution}%`,
-                                background: `linear-gradient(90deg, ${SEGMENT_COLORS[comp.key]}88, ${SEGMENT_COLORS[comp.key]})`,
+                                background: `linear-gradient(90deg, ${color}88, ${color})`,
                               }}
                             />
                           </div>
@@ -1074,122 +1093,127 @@ export default function Home() {
               </div>
               <div className="card-body">
                 <div style={{ display: "flex", flexDirection: "column", gap: "0.625rem" }}>
-                  {predComps.map((comp) => {
-                    const isDisabledOptional = comp.optional && !comp.enabled;
-                    return (
-                      <div
-                        key={comp.key}
-                        className="pred-comp-row"
-                        style={{ opacity: isDisabledOptional ? 0.4 : 1 }}
-                      >
-                        {/* Left: label + description */}
-                        <div className="pred-comp-info">
-                          <span className="pred-comp-name">
-                            <span>{comp.icon}</span>
-                            {comp.label}
-                            {comp.isTarget && (
-                              <span style={{ fontSize: "0.575rem", fontWeight: 700, padding: "0.1rem 0.35rem", borderRadius: 4, background: "var(--accent-dim)", color: "var(--accent-3)", border: "1px solid var(--accent-mid)" }}>
-                                Hedef
-                              </span>
-                            )}
-                            {isDisabledOptional && (
-                              <span style={{ fontSize: "0.575rem", fontWeight: 700, padding: "0.1rem 0.35rem", borderRadius: 4, background: "var(--bg-hover)", color: "var(--text-3)", border: "1px solid var(--border-mid)" }}>
-                                Devre Dışı
-                              </span>
-                            )}
-                          </span>
-                          <span className="pred-comp-sub">
-                            {isDisabledOptional
-                              ? "Bu ders bileşeni yok"
-                              : comp.isTarget
-                              ? "Tahmin hesaplanacak"
-                              : "Aldığın notu gir"}
-                          </span>
-                        </div>
-
-                        {/* Right: weight + grade + action buttons */}
-                        <div className="pred-comp-controls">
-                          {/* Ağırlık input */}
-                          <div className="pred-weight-wrap">
-                            <input
-                              id={`${uid}-pred-weight-${comp.key}`}
-                              type="number"
-                              min={0}
-                              max={100}
-                              className="pred-weight"
-                              value={comp.enabled ? comp.weight : ""}
-                              placeholder="—"
-                              disabled={isDisabledOptional}
-                              onChange={(e) => updatePredComp(comp.key, { weight: e.target.value })}
-                              aria-label={`${comp.label} ağırlığı`}
-                            />
-                            {comp.enabled && <span className="pred-weight-pct">%</span>}
-                          </div>
-
-                          {/* Not input — disabled for target (we're calculating this) */}
+                  {predComps.map((comp) => (
+                    <div key={comp.id} className="pred-comp-row">
+                      {/* Left: editable label */}
+                      <div className="pred-comp-info">
+                        <span className="pred-comp-name">
+                          <span>{comp.icon}</span>
                           <input
-                            id={`${uid}-pred-grade-${comp.key}`}
+                            type="text"
+                            value={comp.label}
+                            onChange={(e) => updatePredComp(comp.id, { label: e.target.value })}
+                            className="course-input"
+                            style={{ fontSize: "0.9rem", fontWeight: 700, width: "auto", minWidth: "4rem", maxWidth: "10rem" }}
+                            aria-label={`${comp.label} adı`}
+                          />
+                          {comp.isTarget && (
+                            <span style={{ fontSize: "0.575rem", fontWeight: 700, padding: "0.1rem 0.35rem", borderRadius: 4, background: "var(--accent-dim)", color: "var(--accent-3)", border: "1px solid var(--accent-mid)", flexShrink: 0 }}>
+                              Hedef
+                            </span>
+                          )}
+                        </span>
+                        <span className="pred-comp-sub">
+                          {comp.isTarget ? "Tahmin hesaplanacak" : "Aldığın notu gir"}
+                        </span>
+                      </div>
+
+                      {/* Right: weight + grade + buttons */}
+                      <div className="pred-comp-controls">
+                        {/* Ağırlık input */}
+                        <div className="pred-weight-wrap">
+                          <input
+                            id={`${uid}-pred-weight-${comp.id}`}
                             type="number"
                             min={0}
                             max={100}
-                            step={0.5}
-                            placeholder={comp.isTarget ? "?" : "—"}
-                            className="pred-number"
-                            value={comp.grade}
-                            disabled={comp.isTarget || isDisabledOptional}
-                            onChange={(e) => updatePredComp(comp.key, { grade: e.target.value })}
-                            aria-label={`${comp.label} notu`}
+                            className="pred-weight"
+                            value={comp.weight}
+                            placeholder="—"
+                            onChange={(e) => updatePredComp(comp.id, { weight: e.target.value })}
+                            aria-label={`${comp.label} ağırlığı`}
                           />
-
-                          {/* Hedef yap — only for non-target, enabled comps */}
-                          {!comp.isTarget && comp.enabled && (
-                            <button
-                              className="btn btn-ghost btn-sm"
-                              style={{ whiteSpace: "nowrap", fontSize: "0.6rem", padding: "0.275rem 0.45rem" }}
-                              onClick={() => setPredTarget(comp.key)}
-                              aria-label={`${comp.label}'i hedef yap`}
-                            >
-                              Hedef yap
-                            </button>
-                          )}
-                          {comp.isTarget && <div style={{ width: 58 }} />}
-
-                          {/* Optional toggle */}
-                          {comp.optional && (
-                            <button
-                              className={`toggle-btn ${comp.enabled ? "remove" : "add"}`}
-                              onClick={() => togglePredComp(comp.key)}
-                              title={comp.enabled ? "Bu bileşeni dersten kaldır" : "Bu bileşeni ekle"}
-                              aria-label={comp.enabled ? `${comp.label} kaldır` : `${comp.label} ekle`}
-                            >
-                              {comp.enabled ? "✕" : "+"}
-                            </button>
-                          )}
+                          <span className="pred-weight-pct">%</span>
                         </div>
+
+                        {/* Not input — disabled for target */}
+                        <input
+                          id={`${uid}-pred-grade-${comp.id}`}
+                          type="number"
+                          min={0}
+                          max={100}
+                          step={0.5}
+                          placeholder={comp.isTarget ? "?" : "—"}
+                          className="pred-number"
+                          value={comp.grade}
+                          disabled={comp.isTarget}
+                          onChange={(e) => updatePredComp(comp.id, { grade: e.target.value })}
+                          aria-label={`${comp.label} notu`}
+                        />
+
+                        {/* Hedef yap */}
+                        {!comp.isTarget && (
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            style={{ whiteSpace: "nowrap", fontSize: "0.6rem", padding: "0.275rem 0.45rem" }}
+                            onClick={() => setPredTarget(comp.id)}
+                            aria-label={`${comp.label}'i hedef yap`}
+                          >
+                            Hedef yap
+                          </button>
+                        )}
+                        {comp.isTarget && <div style={{ width: 60 }} />}
+
+                        {/* Sil butonu */}
+                        {comp.removable ? (
+                          <button
+                            className="toggle-btn remove"
+                            onClick={() => removePredComp(comp.id)}
+                            title={`${comp.label} kaldır`}
+                            aria-label={`${comp.label} kaldır`}
+                          >
+                            ✕
+                          </button>
+                        ) : (
+                          <div style={{ width: 28 }} />
+                        )}
                       </div>
-                    );
-                  })}
+                    </div>
+                  ))}
                 </div>
 
-                {/* Ağırlık toplamı uyarısı */}
+                {/* Ağırlık toplamı */}
                 {(() => {
-                  const enabledTotal = predComps
-                    .filter((c) => c.enabled)
-                    .reduce((s, c) => { const w = parseFloat(c.weight); return s + (isNaN(w) ? 0 : w); }, 0);
+                  const total = predComps.reduce((s, c) => { const w = parseFloat(c.weight); return s + (isNaN(w) ? 0 : w); }, 0);
                   return (
                     <div className={`weight-total ${predWeightOk ? "ok" : "err"}`} style={{ marginTop: "0.75rem" }}>
-                      <span>Aktif bileşenlerin toplam ağırlığı</span>
+                      <span>Toplam Ağırlık</span>
                       <span>
-                        {predWeightOk ? "✓" : "⚠"} %{Math.round(enabledTotal)}
+                        {predWeightOk ? "✓" : "⚠"} %{Math.round(total)}
                         {!predWeightOk && (
                           <span style={{ fontWeight: 500, marginLeft: "0.25rem" }}>
-                            — %{Math.abs(Math.round(100 - enabledTotal))} {100 - enabledTotal > 0 ? "eksik" : "fazla"}
+                            — %{Math.abs(Math.round(100 - total))} {100 - total > 0 ? "eksik" : "fazla"}
                           </span>
                         )}
                       </span>
                     </div>
                   );
                 })()}
+
+                {/* Preset ekle butonları */}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "0.375rem", marginTop: "0.625rem", paddingTop: "0.625rem", borderTop: "1px solid var(--border)" }}>
+                  <span style={{ fontSize: "0.6rem", fontWeight: 700, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.08em", alignSelf: "center", marginRight: "0.125rem" }}>+ Ekle:</span>
+                  {COMP_PRESETS.map((p) => (
+                    <button
+                      key={p.label}
+                      className="btn btn-ghost btn-sm"
+                      style={{ fontSize: "0.7rem", padding: "0.25rem 0.5rem" }}
+                      onClick={() => addPredComp(p.label, p.icon)}
+                    >
+                      {p.icon} {p.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             </section>
 
