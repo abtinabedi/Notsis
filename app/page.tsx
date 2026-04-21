@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo, useId } from "react";
+import { useState, useCallback, useMemo, useId, useEffect } from "react";
 
 /* ──────────────────────────────────────────────────────────────
    TYPES & CONSTANTS
@@ -127,6 +127,23 @@ function freshPredComps(): PredComp[] {
 export default function Home() {
   const uid = useId();
   const [activeModule, setActiveModule] = useState<Module>("calculator");
+  const [isDark, setIsDark] = useState(true);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("notsis-theme");
+    const dark = saved ? saved === "dark" : true;
+    setIsDark(dark);
+    document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+  }, []);
+
+  const toggleTheme = useCallback(() => {
+    setIsDark((prev) => {
+      const next = !prev;
+      document.documentElement.setAttribute("data-theme", next ? "dark" : "light");
+      localStorage.setItem("notsis-theme", next ? "dark" : "light");
+      return next;
+    });
+  }, []);
 
   /* ════════════════════════════════════════
      MODULE 1 — Not Hesaplayıcı State
@@ -438,6 +455,14 @@ export default function Home() {
               <span className="topbar-badge-dot" aria-hidden="true" />
               Çevrimiçi
             </span>
+            <button
+              className="theme-toggle"
+              onClick={toggleTheme}
+              aria-label={isDark ? "Açık moda geç" : "Koyu moda geç"}
+              title={isDark ? "Açık mod" : "Koyu mod"}
+            >
+              {isDark ? "☀️" : "🌙"}
+            </button>
           </div>
         </header>
 
@@ -1063,12 +1088,12 @@ export default function Home() {
                             <span>{comp.icon}</span>
                             {comp.label}
                             {comp.isTarget && (
-                              <span style={{ fontSize: "0.6rem", fontWeight: 700, padding: "0.1rem 0.4rem", borderRadius: 4, background: "var(--accent-dim)", color: "var(--accent-3)", border: "1px solid var(--accent-mid)" }}>
+                              <span style={{ fontSize: "0.575rem", fontWeight: 700, padding: "0.1rem 0.35rem", borderRadius: 4, background: "var(--accent-dim)", color: "var(--accent-3)", border: "1px solid var(--accent-mid)" }}>
                                 Hedef
                               </span>
                             )}
                             {isDisabledOptional && (
-                              <span style={{ fontSize: "0.6rem", fontWeight: 700, padding: "0.1rem 0.4rem", borderRadius: 4, background: "var(--bg-hover)", color: "var(--text-3)", border: "1px solid var(--border-mid)" }}>
+                              <span style={{ fontSize: "0.575rem", fontWeight: 700, padding: "0.1rem 0.35rem", borderRadius: 4, background: "var(--bg-hover)", color: "var(--text-3)", border: "1px solid var(--border-mid)" }}>
                                 Devre Dışı
                               </span>
                             )}
@@ -1077,13 +1102,13 @@ export default function Home() {
                             {isDisabledOptional
                               ? "Bu ders bileşeni yok"
                               : comp.isTarget
-                              ? "Bu bileşen için tahmin hesaplanacak"
+                              ? "Tahmin hesaplanacak"
                               : "Aldığın notu gir"}
                           </span>
                         </div>
 
                         {/* Right: weight + grade + action buttons */}
-                        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                        <div className="pred-comp-controls">
                           {/* Ağırlık input */}
                           <div className="pred-weight-wrap">
                             <input
@@ -1116,34 +1141,30 @@ export default function Home() {
                             aria-label={`${comp.label} notu`}
                           />
 
-                          {/* Action button: "Hedef yap" or optional toggle */}
-                          <div style={{ display: "flex", gap: "0.25rem", alignItems: "center" }}>
-                            {/* Hedef yap — only for non-target, enabled comps */}
-                            {!comp.isTarget && comp.enabled && (
-                              <button
-                                className="btn btn-ghost btn-sm"
-                                style={{ whiteSpace: "nowrap", fontSize: "0.625rem", padding: "0.3rem 0.5rem" }}
-                                onClick={() => setPredTarget(comp.key)}
-                                aria-label={`${comp.label}'i hedef yap`}
-                              >
-                                Hedef yap
-                              </button>
-                            )}
-                            {/* Spacer for target comp (keeps layout stable) */}
-                            {comp.isTarget && <div style={{ width: 66 }} />}
+                          {/* Hedef yap — only for non-target, enabled comps */}
+                          {!comp.isTarget && comp.enabled && (
+                            <button
+                              className="btn btn-ghost btn-sm"
+                              style={{ whiteSpace: "nowrap", fontSize: "0.6rem", padding: "0.275rem 0.45rem" }}
+                              onClick={() => setPredTarget(comp.key)}
+                              aria-label={`${comp.label}'i hedef yap`}
+                            >
+                              Hedef yap
+                            </button>
+                          )}
+                          {comp.isTarget && <div style={{ width: 58 }} />}
 
-                            {/* Optional toggle (add/remove from course) */}
-                            {comp.optional && (
-                              <button
-                                className={`toggle-btn ${comp.enabled ? "remove" : "add"}`}
-                                onClick={() => togglePredComp(comp.key)}
-                                title={comp.enabled ? "Bu bileşeni dersten kaldır" : "Bu bileşeni ekle"}
-                                aria-label={comp.enabled ? `${comp.label} kaldır` : `${comp.label} ekle`}
-                              >
-                                {comp.enabled ? "✕" : "+"}
-                              </button>
-                            )}
-                          </div>
+                          {/* Optional toggle */}
+                          {comp.optional && (
+                            <button
+                              className={`toggle-btn ${comp.enabled ? "remove" : "add"}`}
+                              onClick={() => togglePredComp(comp.key)}
+                              title={comp.enabled ? "Bu bileşeni dersten kaldır" : "Bu bileşeni ekle"}
+                              aria-label={comp.enabled ? `${comp.label} kaldır` : `${comp.label} ekle`}
+                            >
+                              {comp.enabled ? "✕" : "+"}
+                            </button>
+                          )}
                         </div>
                       </div>
                     );
